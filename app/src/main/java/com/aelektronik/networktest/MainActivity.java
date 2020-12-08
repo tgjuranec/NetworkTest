@@ -8,7 +8,6 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.wifi.WifiManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -16,12 +15,10 @@ import android.telephony.CellInfo;
 import android.telephony.CellInfoCdma;
 import android.telephony.CellInfoGsm;
 import android.telephony.CellInfoLte;
-import android.telephony.CellInfoTdscdma;
 import android.telephony.CellInfoWcdma;
 import android.telephony.CellSignalStrengthCdma;
 import android.telephony.CellSignalStrengthGsm;
 import android.telephony.CellSignalStrengthLte;
-import android.telephony.CellSignalStrengthTdscdma;
 import android.telephony.CellSignalStrengthWcdma;
 import android.telephony.TelephonyManager;
 import android.util.Log;
@@ -45,28 +42,51 @@ import static android.telephony.TelephonyManager.*;
 
 
 public class MainActivity extends AppCompatActivity {
-
+    String TAG = "NetworkTest";
     static TelephonyManager telephonyManager;
-    static TextView tvStrength, tvCellInfo;
-    static long storeTime;
-    static int changeCount = 0;
+
+    //GUI global vars
+    static TextView tvStrength, tvNetworkDataType;
     TextView tvDownloadStatus;
     ProgressBar barDownload;
     DownloadThread downloadThread;
     Button btDownload;
-    String TAG = "NetworkTest";
 
-    long timeDownloadStart, timeDownloadEnd;
+    //Control - main thread vars
+    int downloadActive = 0;
+    int downloadStarted = 0;
+    int counterDownload = 0;
+    private static String file_url_2G = "https://datahub.io/datahq/1mb-test/r/1mb-test.csv";
+    private static String file_url_3G = "https://datahub.io/datahq/1mb-test/r/1mb-test.csv";
+    private static String file_url_LTE = "https://datahub.io/datahq/1mb-test/r/1mb-test.csv";
+
+    //Network status thread vars
+    int powerDBM = 0;
+    String strCellInfo;
+    String strNetworkDataType;
+
+
+    //Download thread vars
+    long timeDownloadStart = 0, timeDownloadEnd = 0;
+    float timeDownload = 0, throughPutkBs = 0;
+    float timeDownload2G = 0, throughPutkBs2G = 0;
+    float timeDownload3G = 0, throughPutkBs3G = 0;
+    float timeDownloadLTE = 0, throughPutkBsLTE = 0;
+
+    //PASS/FAIL vars
+    int pass2G = 1;
+    int pass3G = 1;
+    int passLTE = 1;
 
     WifiManager wifiManager;
-    private static String file_url_2G = "https://datahub.io/datahq/1mb-test/r/1mb-test.csv";
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         tvStrength = findViewById(R.id.txtStrength);
-        tvCellInfo = findViewById(R.id.txtCellInfo);
+        tvNetworkDataType = findViewById(R.id.txtCellInfo);
         tvDownloadStatus = findViewById(R.id.txtDownloadStatus);
         barDownload = findViewById(R.id.barDownload);
         btDownload = findViewById(R.id.btStartDownload);
@@ -94,83 +114,166 @@ public class MainActivity extends AppCompatActivity {
         btDownload.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                //INITIALIZE DOWNLOAD THREAD
-                //MANDATORY: checking if downloadThread is already created
-                try {
-                    if (downloadThread != null) {
-                        downloadThread = null;
-                    }
-                    downloadThread = new DownloadThread(file_url_2G);
-                } catch (MalformedURLException e) {
-                    e.printStackTrace();
-                }
-                tvDownloadStatus.setText("Download started, please wait");
-                downloadThread.start();
-
+                downloadActive = 1;
+                btDownload.setVisibility(View.GONE);
             }
         });
 
-        //TIMER CODE FOR SIGNAL STRENGTH TRACKING
-
-        Handler handlerSignalTrack = new Handler();
+        //TIMER CODE FOR NETWORK PARAMETER CONTROL AND CHECK SIGNAL STRENGHT
+        Handler handlerCheckConditions = new Handler();
         Runnable processSignal = new Runnable() {
             @Override
             public void run() {
-                getSignalStrength(this);
-                handlerSignalTrack.postDelayed(this, 2000);
+                //CHECK NETWORK STATUS
+                getSignalStrength();
+                getNetworkType();
+                tvNetworkDataType.setText(strNetworkDataType);
+                tvStrength.setText(strCellInfo + ", " + powerDBM +" dbm");
+                //CONTROL DOWNLOAD
+                if(downloadActive > 0){ //download is or it should be activated
+                    if(downloadStarted == 0 ){     //downlload should be started
+                        //INITIALIZE DOWNLOAD THREAD
+                        //MANDATORY: checking if downloadThread is already created
+                        if((counterDownload % 3) == 0) {
+                            try {
+                                if (downloadThread != null) {
+                                    downloadThread = null;
+                                }
+                                downloadThread = new DownloadThread(file_url_2G);
+                            } catch (MalformedURLException e) {
+                                e.printStackTrace();
+                            }
+
+                            tvDownloadStatus.setText("Download 2G started, please wait");
+                            downloadThread.start();
+                            counterDownload++;
+                        }
+                        else if((counterDownload % 3) == 1){ //2G is over, start 3G
+                            //STORE 2G VARS
+                            timeDownload2G = timeDownload;
+                            throughPutkBs2G = throughPutkBs;
+                            //START 3G
+                            try {
+                                if (downloadThread != null) {
+                                    downloadThread = null;
+                                }
+                                downloadThread = new DownloadThread(file_url_3G);
+                            } catch (MalformedURLException e) {
+                                e.printStackTrace();
+                            }
+                            tvDownloadStatus.setText("Download 3G started, please wait");
+                            downloadThread.start();
+                            counterDownload++;
+                        }
+                        else if ((counterDownload %3 )== 2){
+                            timeDownload3G = timeDownload;
+                            throughPutkBs3G = throughPutkBs;
+                            try {
+                                if (downloadThread != null) {
+                                    downloadThread = null;
+                                }
+                                downloadThread = new DownloadThread(file_url_LTE);
+                            } catch (MalformedURLException e) {
+                                e.printStackTrace();
+                            }
+                            tvDownloadStatus.setText("Download LTE started, please wait");
+                            downloadThread.start();
+                            counterDownload++;
+                            downloadActive = 0;
+                        }
+                        else{
+                            //IMPOSSIBLE TO GET HERE!!!
+                            downloadActive = 0;
+                        }
+                    }
+                    else{                            //download is already in charge, we check status
+
+                        if(counterDownload %3 == 1){    //2G
+                            if(powerDBM > -70){
+                                pass2G = 0;
+                            }
+                        }
+                        else if(counterDownload %3 == 2){   //3G
+                            if(powerDBM > -70){
+                                pass3G = 0;
+                            }
+                        }
+                        else if (counterDownload %3 == 0){  //LTE
+                            if(powerDBM > -96){
+                                passLTE = 0;
+                            }
+                        }
+                        else{
+                            //IMPOSSIBLE TO GET HERE
+                        }
+
+
+                    }
+
+                }
+                else{   //downloadActive <= 0
+                    if(downloadStarted == 0 && ((counterDownload % 3) == 0)){
+                        timeDownloadLTE = timeDownload;
+                        throughPutkBsLTE = throughPutkBs;
+                        tvDownloadStatus.setText("Time: " + timeDownload2G + " s" +
+                                "    Throughput: " + throughPutkBs2G + " kBy/s\n" +
+                                "Time: " + timeDownload3G + " s" +
+                                "    Throughput: " + throughPutkBs3G + " kBy/s\n" +
+                                "Time: " + timeDownloadLTE + " s" +
+                                "    Throughput: " + throughPutkBsLTE + " kBy/s\n" +
+                                 + pass2G + pass3G + passLTE);
+                        btDownload.setVisibility(View.VISIBLE);
+                    }
+                }
+
+                //call this func again in 2000ms
+                handlerCheckConditions.postDelayed(this, 2000);
             }
 
         };
-        handlerSignalTrack.post(processSignal);
+        handlerCheckConditions.post(processSignal);
 
     }
 
 
-    private void getSignalStrength(Runnable context) {
-        long curTime, diffTime;
-        curTime = System.currentTimeMillis();
-        diffTime = curTime - storeTime;
-
-        storeTime = curTime;
-
-        String strCellInfo = "";
+    private void getSignalStrength() {
         @SuppressLint("MissingPermission") List<CellInfo> cellInfos = telephonyManager.getAllCellInfo();   //This will give info of all sims present inside your mobile
-        String strStrength = "No cells:" + cellInfos.size() + "\n";
-        changeCount++;
-        strStrength += "Counter: " + changeCount + "\n";
         if (cellInfos != null) {
             for (int i = 0; i < cellInfos.size(); i++) {
                 if (cellInfos.get(i).isRegistered()) {
-                    strStrength += i + ". " + cellInfos.get(i).toString() + "\n";
                     if (cellInfos.get(i) instanceof CellInfoWcdma) {
                         CellInfoWcdma cellInfoWcdma = (CellInfoWcdma) cellInfos.get(i);
                         CellSignalStrengthWcdma cellSignalStrengthWcdma = cellInfoWcdma.getCellSignalStrength();
-                        strCellInfo += ("Wcdma: " + String.valueOf(cellSignalStrengthWcdma.getDbm()) + ", " + cellSignalStrengthWcdma.getAsuLevel() + "\n");
+                        strCellInfo = "WCDMA";
+                        powerDBM = cellSignalStrengthWcdma.getDbm();
                     } else if (cellInfos.get(i) instanceof CellInfoGsm) {
                         CellInfoGsm cellInfogsm = (CellInfoGsm) cellInfos.get(i);
                         CellSignalStrengthGsm cellSignalStrengthGsm = cellInfogsm.getCellSignalStrength();
-                        strCellInfo += ("GSM: " + String.valueOf(cellSignalStrengthGsm.getDbm()) + ", " + cellSignalStrengthGsm.getAsuLevel() + "\n");
+                        strCellInfo = "GSM";
+                        powerDBM = cellSignalStrengthGsm.getDbm();
                     } else if (cellInfos.get(i) instanceof CellInfoLte) {
                         CellInfoLte cellInfoLte = (CellInfoLte) cellInfos.get(i);
                         CellSignalStrengthLte cellSignalStrengthLte = cellInfoLte.getCellSignalStrength();
-                        strCellInfo += ("LTE: " + String.valueOf(cellSignalStrengthLte.getDbm()) + ", " + cellSignalStrengthLte.getRsrp() + "\n");
+                        strCellInfo = "LTE";
+                        powerDBM = cellSignalStrengthLte.getDbm();
                     } else if (cellInfos.get(i) instanceof CellInfoCdma) {
                         CellInfoCdma cellInfoCdma = (CellInfoCdma) cellInfos.get(i);
                         CellSignalStrengthCdma cellSignalStrengthCdma = cellInfoCdma.getCellSignalStrength();
-                        strCellInfo += "CDMA: " + (String.valueOf(cellSignalStrengthCdma.getDbm()) + ", " + cellSignalStrengthCdma.getCdmaDbm() + "\n");
-                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        if (cellInfos.get(i) instanceof CellInfoTdscdma) {
-                            CellInfoTdscdma cellInfoTdscdma = (CellInfoTdscdma) cellInfos.get(i);
-                            CellSignalStrengthTdscdma cellSignalStrengthTdscdma = cellInfoTdscdma.getCellSignalStrength();
-                            strCellInfo += "TSCDMA: " + (String.valueOf(cellSignalStrengthTdscdma.getDbm()) + ", " + cellSignalStrengthTdscdma.getRscp() + "\n");
-                        }
+                        strCellInfo = "CDMA";
+                        powerDBM = cellSignalStrengthCdma.getDbm();
                     } else {
-                        strCellInfo += "No connection\n";
+                        strCellInfo = "No connection\n";
                     }
                 }
 
             }
         }
+        return;
+    }
+
+    
+    private void getNetworkType(){
+
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
             // TODO: Consider calling
             //    ActivityCompat#requestPermissions
@@ -185,64 +288,66 @@ public class MainActivity extends AppCompatActivity {
 
         switch (networkType){
             case NETWORK_TYPE_UNKNOWN:
-                strStrength += "NETWORK_TYPE_UNKNOWN";
+                strNetworkDataType = "NETWORK_TYPE_UNKNOWN";
                 break;
             case NETWORK_TYPE_GPRS:
-                strStrength += "NETWORK_TYPE_GPRS";
+                strNetworkDataType = "NETWORK_TYPE_GPRS";
                 break;
             case NETWORK_TYPE_EDGE:
-                strStrength += "NETWORK_TYPE_EDGE";
+                strNetworkDataType = "NETWORK_TYPE_EDGE";
                 break;
             case NETWORK_TYPE_UMTS:
-                strStrength += "NETWORK_TYPE_UMTS";
+                strNetworkDataType = "NETWORK_TYPE_UMTS";
                 break;
             case NETWORK_TYPE_HSDPA:
-                strStrength += "NETWORK_TYPE_HSDPA";
+                strNetworkDataType = "NETWORK_TYPE_HSDPA";
                 break;
             case NETWORK_TYPE_HSUPA:
-                strStrength += "NETWORK_TYPE_HSUPA";
+                strNetworkDataType = "NETWORK_TYPE_HSUPA";
                 break;
             case NETWORK_TYPE_HSPA:
-                strStrength += "NETWORK_TYPE_HSPA";
+                strNetworkDataType = "NETWORK_TYPE_HSPA";
                 break;
             case NETWORK_TYPE_CDMA:
-                strStrength += "NETWORK_TYPE_CDMA";
+                strNetworkDataType = "NETWORK_TYPE_CDMA";
                 break;
             case NETWORK_TYPE_EVDO_0:
-                strStrength += "NETWORK_TYPE_EVDO_0";
+                strNetworkDataType = "NETWORK_TYPE_EVDO_0";
                 break;
             case NETWORK_TYPE_EVDO_A:
-                strStrength += "NETWORK_TYPE_EVDO_A";
+                strNetworkDataType = "NETWORK_TYPE_EVDO_A";
                 break;
             case NETWORK_TYPE_EVDO_B:
-                strStrength += "NETWORK_TYPE_EVDO_B";
+                strNetworkDataType = "NETWORK_TYPE_EVDO_B";
                 break;
             case NETWORK_TYPE_1xRTT:
-                strStrength += "NETWORK_TYPE_1xRTT";
+                strNetworkDataType = "NETWORK_TYPE_1xRTT";
                 break;
             case NETWORK_TYPE_IDEN:
-                strStrength += "NETWORK_TYPE_IDEN";
+                strNetworkDataType = "NETWORK_TYPE_IDEN";
                 break;
             case NETWORK_TYPE_LTE:
-                strStrength += "NETWORK_TYPE_LTE";
+                strNetworkDataType = "NETWORK_TYPE_LTE";
                 break;
             case NETWORK_TYPE_EHRPD:
-                strStrength += "NETWORK_TYPE_EHRPD";
+                strNetworkDataType = "NETWORK_TYPE_EHRPD";
                 break;
             case NETWORK_TYPE_HSPAP:
-                strStrength += "NETWORK_TYPE_HSPAP";
+                strNetworkDataType = "NETWORK_TYPE_HSPAP";
                 break;
             case NETWORK_TYPE_NR:
-                strStrength += "NETWORK_TYPE_NR";
+                strNetworkDataType = "NETWORK_TYPE_NR";
                 break;
             default:
-                strStrength += "NETWORK_TYPE_DEFAULT";
+                strNetworkDataType = "NETWORK_TYPE_DEFAULT";
                 break;
 
         }
-        tvStrength.setText(strStrength);
-        tvCellInfo.setText(strCellInfo);
+        return;
     }
+
+
+
 
 
 
@@ -268,6 +373,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void run(){
             int count;
+            downloadStarted = 1;
             try {
 
                 //SET PROGRESS BAR TO 0
@@ -283,7 +389,7 @@ public class MainActivity extends AppCompatActivity {
                 connection.connect();
                 long lenghtOfFile = connection.getContentLengthLong();
 
-                //CHECK FILESIZE
+                //CHECK IF FILE ALREADY EXISTS
                 File exFile = new File(Environment.getExternalStorageDirectory().toString()
                         + "/test.csv");
                 if(exFile.exists()){
@@ -291,7 +397,7 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(TAG, "File deleted!");
                 }
 
-                Log.d(TAG, "Downlaod started");
+                Log.d(TAG, "Download started");
 
                 //DOWNLOAD
                 timeDownloadStart = System.currentTimeMillis();
@@ -324,8 +430,8 @@ public class MainActivity extends AppCompatActivity {
                     output.write(data, 0, count);
                 }
                 timeDownloadEnd = System.currentTimeMillis();
-                float timeDownload = ((float)(timeDownloadEnd - timeDownloadStart))/1000;
-                float throughPutkBs = lenghtOfFile/timeDownload/1000;
+                timeDownload = ((float)(timeDownloadEnd - timeDownloadStart))/1000;
+                throughPutkBs = lenghtOfFile/timeDownload/1000;
                 // flushing output
                 output.flush();
                 Log.d(TAG, "File downloaded!");
@@ -336,10 +442,6 @@ public class MainActivity extends AppCompatActivity {
                 tvDownloadStatus.post(new Runnable() {
                     @Override
                     public void run() {
-                        tvDownloadStatus.setText("File: " + exFile.getName() +
-                                "\nDownloaded: " + lenghtOfFile + " bytes.\n" +
-                                "Time: " + timeDownload + " s" +
-                                "\nThroughput: " + throughPutkBs + " kBy/s");
                         barDownload.setProgress(100);
                     }
                 });
@@ -348,13 +450,8 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) {
                 Log.e(TAG, e.getMessage());
             }
-
+            downloadStarted = 0;
             return;
         }
-
-
     }
-
-
-
 }
