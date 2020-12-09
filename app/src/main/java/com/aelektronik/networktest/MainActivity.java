@@ -6,11 +6,13 @@ import androidx.core.app.ActivityCompat;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.provider.Settings;
 import android.telephony.CellInfo;
 import android.telephony.CellInfoCdma;
 import android.telephony.CellInfoGsm;
@@ -51,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
     ProgressBar barDownload;
     DownloadThread downloadThread;
     Button btDownload;
-
+    Intent intent;
     //Control - main thread vars
     int downloadActive = 0;
     int downloadStarted = 0;
@@ -109,13 +111,15 @@ public class MainActivity extends AppCompatActivity {
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         wifiManager.setWifiEnabled(true);
 
-
+        intent = new Intent(Settings.ACTION_NETWORK_OPERATOR_SETTINGS);
+  
         //BUTTON LISTENER FOR STARTING DOWNLOAD
         btDownload.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 downloadActive = 1;
                 btDownload.setVisibility(View.GONE);
+                startActivityForResult(intent,1);
             }
         });
 
@@ -126,60 +130,65 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 //CHECK NETWORK STATUS
                 getSignalStrength();
-                getNetworkType();
                 tvNetworkDataType.setText(strNetworkDataType);
                 tvStrength.setText(strCellInfo + ", " + powerDBM +" dbm");
                 //CONTROL DOWNLOAD
-                if(downloadActive > 0){ //download is or it should be activated
-                    if(downloadStarted == 0 ){     //downlload should be started
+                if(downloadActive > 0){ //download is running or it should be activated
+                    if(downloadStarted == 0 ){     //download should be started
                         //INITIALIZE DOWNLOAD THREAD
                         //MANDATORY: checking if downloadThread is already created
                         if((counterDownload % 3) == 0) {
-                            try {
-                                if (downloadThread != null) {
-                                    downloadThread = null;
+                            if(getNetworkDataType() == "2G") {
+                                try {
+                                    if (downloadThread != null) {
+                                        downloadThread = null;
+                                    }
+                                    downloadThread = new DownloadThread(file_url_2G);
+                                } catch (MalformedURLException e) {
+                                    e.printStackTrace();
                                 }
-                                downloadThread = new DownloadThread(file_url_2G);
-                            } catch (MalformedURLException e) {
-                                e.printStackTrace();
-                            }
 
-                            tvDownloadStatus.setText("Download 2G started, please wait");
-                            downloadThread.start();
-                            counterDownload++;
+                                tvDownloadStatus.setText("Download 2G started, please wait");
+                                downloadThread.start();
+                                counterDownload++;
+                            }
                         }
                         else if((counterDownload % 3) == 1){ //2G is over, start 3G
-                            //STORE 2G VARS
-                            timeDownload2G = timeDownload;
-                            throughPutkBs2G = throughPutkBs;
-                            //START 3G
-                            try {
-                                if (downloadThread != null) {
-                                    downloadThread = null;
+                            if(getNetworkDataType() == "2G") {
+                                //STORE 2G VARS
+                                timeDownload2G = timeDownload;
+                                throughPutkBs2G = throughPutkBs;
+                                //START 3G
+                                try {
+                                    if (downloadThread != null) {
+                                        downloadThread = null;
+                                    }
+                                    downloadThread = new DownloadThread(file_url_3G);
+                                } catch (MalformedURLException e) {
+                                    e.printStackTrace();
                                 }
-                                downloadThread = new DownloadThread(file_url_3G);
-                            } catch (MalformedURLException e) {
-                                e.printStackTrace();
+                                tvDownloadStatus.setText("Download 3G started, please wait");
+                                downloadThread.start();
+                                counterDownload++;
                             }
-                            tvDownloadStatus.setText("Download 3G started, please wait");
-                            downloadThread.start();
-                            counterDownload++;
                         }
                         else if ((counterDownload %3 )== 2){
-                            timeDownload3G = timeDownload;
-                            throughPutkBs3G = throughPutkBs;
-                            try {
-                                if (downloadThread != null) {
-                                    downloadThread = null;
+                            if(getNetworkDataType() == "LTE") {
+                                timeDownload3G = timeDownload;
+                                throughPutkBs3G = throughPutkBs;
+                                try {
+                                    if (downloadThread != null) {
+                                        downloadThread = null;
+                                    }
+                                    downloadThread = new DownloadThread(file_url_LTE);
+                                } catch (MalformedURLException e) {
+                                    e.printStackTrace();
                                 }
-                                downloadThread = new DownloadThread(file_url_LTE);
-                            } catch (MalformedURLException e) {
-                                e.printStackTrace();
+                                tvDownloadStatus.setText("Download LTE started, please wait");
+                                downloadThread.start();
+                                counterDownload++;
+                                downloadActive = 0;
                             }
-                            tvDownloadStatus.setText("Download LTE started, please wait");
-                            downloadThread.start();
-                            counterDownload++;
-                            downloadActive = 0;
                         }
                         else{
                             //IMPOSSIBLE TO GET HERE!!!
@@ -191,6 +200,9 @@ public class MainActivity extends AppCompatActivity {
                         if(counterDownload %3 == 1){    //2G
                             if(powerDBM > -70){
                                 pass2G = 0;
+                            }
+                            switch (strNetworkDataType){
+                                
                             }
                         }
                         else if(counterDownload %3 == 2){   //3G
@@ -348,6 +360,63 @@ public class MainActivity extends AppCompatActivity {
 
 
 
+    private String getNetworkDataType(){
+
+        String strNetworkType = "";
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+        }
+        int networkType = telephonyManager.getDataNetworkType();
+
+
+        switch (networkType){
+            case NETWORK_TYPE_UNKNOWN:
+                strNetworkType = "UNKNOWN";
+                break;
+            case NETWORK_TYPE_GPRS:
+            case NETWORK_TYPE_EDGE:
+                strNetworkType = "2G";
+                break;
+            case NETWORK_TYPE_UMTS:
+            case NETWORK_TYPE_HSDPA:
+            case NETWORK_TYPE_HSUPA:
+            case NETWORK_TYPE_HSPA:
+            case NETWORK_TYPE_CDMA:
+                strNetworkType = "3G";
+                break;
+            case NETWORK_TYPE_EVDO_0:
+            case NETWORK_TYPE_EVDO_A:
+            case NETWORK_TYPE_EVDO_B:
+            case NETWORK_TYPE_1xRTT:
+                strNetworkType = "3G";
+                break;
+            case NETWORK_TYPE_IDEN:
+                strNetworkType = "2G";
+                break;
+            case NETWORK_TYPE_LTE:
+                strNetworkType = "LTE";
+                break;
+            case NETWORK_TYPE_EHRPD:
+            case NETWORK_TYPE_HSPAP:
+                strNetworkType = "3G";
+                break;
+
+            case NETWORK_TYPE_NR:
+                strNetworkType = "5G";
+                break;
+            default:
+                strNetworkType = "UNKNOWN";
+                break;
+
+        }
+        return strNetworkType;
+    }
 
 
 
