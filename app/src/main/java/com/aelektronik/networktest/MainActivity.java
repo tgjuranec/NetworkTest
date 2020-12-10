@@ -55,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
     Button btDownload;
     Intent intent;
     //Control - main thread vars
+    int settingsOpen = 0;
     int downloadActive = 0;
     int downloadStarted = 0;
     int counterDownload = 0;
@@ -119,7 +120,6 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View view) {
                 downloadActive = 1;
                 btDownload.setVisibility(View.GONE);
-                startActivityForResult(intent,1);
             }
         });
 
@@ -130,6 +130,7 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 //CHECK NETWORK STATUS
                 getSignalStrength();
+                getNetworkType();
                 tvNetworkDataType.setText(strNetworkDataType);
                 tvStrength.setText(strCellInfo + ", " + powerDBM +" dbm");
                 //CONTROL DOWNLOAD
@@ -138,7 +139,7 @@ public class MainActivity extends AppCompatActivity {
                         //INITIALIZE DOWNLOAD THREAD
                         //MANDATORY: checking if downloadThread is already created
                         if((counterDownload % 3) == 0) {
-                            if(getNetworkDataType() == "2G") {
+                            if(strCellInfo == "GSM") {
                                 try {
                                     if (downloadThread != null) {
                                         downloadThread = null;
@@ -152,9 +153,15 @@ public class MainActivity extends AppCompatActivity {
                                 downloadThread.start();
                                 counterDownload++;
                             }
+                            else{
+                                if(settingsOpen == 0){
+                                    startActivity(intent);
+                                    settingsOpen = 1;
+                                }
+                            }
                         }
                         else if((counterDownload % 3) == 1){ //2G is over, start 3G
-                            if(getNetworkDataType() == "2G") {
+                            if((strCellInfo == "WCDMA") || (strCellInfo == "CDMA")) {
                                 //STORE 2G VARS
                                 timeDownload2G = timeDownload;
                                 throughPutkBs2G = throughPutkBs;
@@ -171,9 +178,15 @@ public class MainActivity extends AppCompatActivity {
                                 downloadThread.start();
                                 counterDownload++;
                             }
+                            else{
+                                if(settingsOpen == 0){
+                                    startActivity(intent);
+                                    settingsOpen = 1;
+                                }
+                            }
                         }
                         else if ((counterDownload %3 )== 2){
-                            if(getNetworkDataType() == "LTE") {
+                            if(strCellInfo == "LTE") {
                                 timeDownload3G = timeDownload;
                                 throughPutkBs3G = throughPutkBs;
                                 try {
@@ -189,6 +202,12 @@ public class MainActivity extends AppCompatActivity {
                                 counterDownload++;
                                 downloadActive = 0;
                             }
+                            else{
+                                if(settingsOpen == 0){
+                                    startActivity(intent);
+                                    settingsOpen = 1;
+                                }
+                            }
                         }
                         else{
                             //IMPOSSIBLE TO GET HERE!!!
@@ -201,9 +220,7 @@ public class MainActivity extends AppCompatActivity {
                             if(powerDBM > -70){
                                 pass2G = 0;
                             }
-                            switch (strNetworkDataType){
-                                
-                            }
+
                         }
                         else if(counterDownload %3 == 2){   //3G
                             if(powerDBM > -70){
@@ -239,12 +256,22 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 //call this func again in 2000ms
-                handlerCheckConditions.postDelayed(this, 2000);
+                handlerCheckConditions.postDelayed(this, 3000);
             }
 
         };
         handlerCheckConditions.post(processSignal);
+    }
 
+    @Override
+    public void onResume() {
+        super.onResume();
+        settingsOpen = 0;
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
     }
 
 
